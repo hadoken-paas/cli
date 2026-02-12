@@ -22,9 +22,14 @@ main() {
 
     verify_checksum "$tmpdir" "$binary"
 
-    install_dir="$(pick_install_dir)"
-    mkdir -p "$install_dir"
-    mv "$tmpdir/$binary" "$install_dir/hadoken"
+    install_dir="/usr/local/bin"
+    if [ -w "$install_dir" ]; then
+        mv "$tmpdir/$binary" "$install_dir/hadoken"
+    else
+        printf "Installing to %s (requires sudo)...\n" "$install_dir"
+        sudo mv "$tmpdir/$binary" "$install_dir/hadoken"
+        sudo chmod +x "$install_dir/hadoken"
+    fi
     chmod +x "$install_dir/hadoken"
 
     printf "Installed to %s/hadoken\n" "$install_dir"
@@ -96,23 +101,6 @@ verify_checksum() {
     if [ "$expected" != "$actual" ]; then
         printf "Error: checksum mismatch for %s\n  expected: %s\n  actual:   %s\n" "$binary" "$expected" "$actual" >&2
         exit 1
-    fi
-}
-
-pick_install_dir() {
-    if [ -w /usr/local/bin ]; then
-        echo "/usr/local/bin"
-    else
-        dir="${HOME}/.local/bin"
-        mkdir -p "$dir"
-        case ":${PATH}:" in
-            *":${dir}:"*) ;;
-            *)
-                printf "Note: %s is not in your PATH. Add it:\n" "$dir" >&2
-                printf "  export PATH=\"%s:\$PATH\"\n" "$dir" >&2
-                ;;
-        esac
-        echo "$dir"
     fi
 }
 
