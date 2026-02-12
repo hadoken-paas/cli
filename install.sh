@@ -4,6 +4,7 @@ set -e
 VERSION="0.7.0"
 REPO="hadoken-paas/cli"
 BASE_URL="https://github.com/${REPO}/releases/download/v${VERSION}"
+INSTALL_DIR="${HADOKEN_INSTALL:-$HOME/.hadoken}/bin"
 
 main() {
     os="$(detect_os)"
@@ -22,18 +23,14 @@ main() {
 
     verify_checksum "$tmpdir" "$binary"
 
-    install_dir="/usr/local/bin"
-    if [ -w "$install_dir" ]; then
-        mv "$tmpdir/$binary" "$install_dir/hadoken"
-    else
-        printf "Installing to %s (requires sudo)...\n" "$install_dir"
-        sudo mv "$tmpdir/$binary" "$install_dir/hadoken"
-        sudo chmod +x "$install_dir/hadoken"
-    fi
-    chmod +x "$install_dir/hadoken"
+    mkdir -p "$INSTALL_DIR"
+    mv "$tmpdir/$binary" "$INSTALL_DIR/hadoken"
+    chmod +x "$INSTALL_DIR/hadoken"
 
-    printf "Installed to %s/hadoken\n" "$install_dir"
-    "$install_dir/hadoken" version
+    printf "Installed to %s/hadoken\n" "$INSTALL_DIR"
+    "$INSTALL_DIR/hadoken" version
+
+    setup_path
 }
 
 detect_os() {
@@ -59,7 +56,6 @@ detect_arch() {
 }
 
 # Only darwin/arm64, darwin/amd64, linux/amd64 are built.
-# linux/arm64 is not available yet.
 validate_target() {
     os="$1"
     arch="$2"
@@ -102,6 +98,69 @@ verify_checksum() {
         printf "Error: checksum mismatch for %s\n  expected: %s\n  actual:   %s\n" "$binary" "$expected" "$actual" >&2
         exit 1
     fi
+}
+
+setup_path() {
+    case ":${PATH}:" in
+        *":${INSTALL_DIR}:"*) return ;;
+    esac
+
+    line="export PATH=\"${INSTALL_DIR}:\$PATH\""
+
+    if is_interactive; then
+        printf "\n%s is not in your PATH.\n" "$INSTALL_DIR"
+        printf "Add it to your shell profile? (Y/n) "
+        read -r answer </dev/tty
+        case "$answer" in
+            [nN]*) print_manual_path "$line"; return ;;
+        esac
+        append_to_rc "$line"
+    else
+        print_manual_path "$line"
+    fi
+}
+
+is_interactive() {
+    [ -t 0 ] || [ -t 1 ]
+}
+
+detect_rc_file() {
+    shell_name="$(basename "${SHELL:-/bin/sh}")"
+    case "$shell_name" in
+        zsh)  echo "${ZDOTDIR:-$HOME}/.zshrc" ;;
+        bash)
+            if [ -f "$HOME/.bash_profile" ]; then
+                echo "$HOME/.bash_profile"
+            else
+                echo "$HOME/.bashrc"
+            fi
+            ;;
+        fish) echo "${XDG_CONFIG_HOME:-$HOME/.config}/fish/config.fish" ;;
+        *)    echo "$HOME/.profile" ;;
+    esac
+}
+
+append_to_rc() {
+    line="$1"
+    rc="$(detect_rc_file)"
+    shell_name="$(basename "${SHELL:-/bin/sh}")"
+
+    if [ "$shell_name" = "fish" ]; then
+        line="set -gx PATH \"${INSTALL_DIR}\" \$PATH"
+    fi
+
+    if [ -f "$rc" ] && grep -qF "$INSTALL_DIR" "$rc" 2>/dev/null; then
+        printf "Already in %s\n" "$rc"
+        return
+    fi
+
+    printf "\n# hadoken\n%s\n" "$line" >> "$rc"
+    printf "Added to %s. Restart your shell or run:\n  %s\n" "$rc" "$line"
+}
+
+print_manual_path() {
+    line="$1"
+    printf "To add it manually, add this to your shell profile:\n  %s\n" "$line"
 }
 
 validate_target "$(detect_os)" "$(detect_arch)"
